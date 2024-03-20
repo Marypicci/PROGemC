@@ -25,3 +25,34 @@ int main(void)
 
 	return 0;
 }
+
+....................................................................................................................
+//esse mesmo código só que sem precisar repetir 'struct'
+
+//código mostra quantos segundos tem o horário dado
+
+#include <stdio.h>
+
+typedef struct { //não repete 'struct' graças ao typedef
+	int hh;	
+	int mm;
+	int ss;
+}marca;
+int converte_segundos(marca horario)
+{
+	return horario.hh * 3600 + horario.mm * 60 + horario.ss;
+}
+int main(void)
+{
+	int segundos;
+	marca horario;
+
+	printf("Informe um horario (hh:mm:ss): ");
+	scanf("%d:%d:%d", &horario.hh, &horario.mm, &horario.ss);
+
+	segundos = converte_segundos(horario);
+
+	printf("Passaram-se %d segundo(s) neste dia\n", segundos);
+
+	return 0;
+}
