@@ -1,5 +1,7 @@
-#include<stdio.h>
+//código vai imprimir a frase 'hello word!' para o usuário
 
-void main(){
+#include <stdio.h>
 
-};
+int main(){
+	printf("Hello Word!\n");
+}
