@@ -7,7 +7,7 @@ struct marca {
 	int mm;
 	int ss;
 };
-int converte_segundos(struct marca tempo)
+int converte_segundos(struct marca tempo) //tempo é o nome usado apenas dentro dessa função, pode ser qualquer um
 {
 	return tempo.hh * 3600 + tempo.mm * 60 + tempo.ss;
 }
