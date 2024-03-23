@@ -1,0 +1,36 @@
+//código entrega o valor de X elevado a N
+
+#include <stdio.h>
+
+int pot (int x, int n){ //calcula swem recursão
+  int r = 1;
+  if(n==0)
+    r = 1;
+  else{
+    for(int i=0;i<n;i++){
+      r = r * x;
+    }
+  return r;
+  }
+}
+
+int potR (int x, int n){ //calcula  de modu recursivo
+  if(n==0)
+    return 1;
+  else
+    return x * potR(x, n-1);
+}
+
+int main(){
+  int x;
+  int n;
+  int y, w;
+  scanf("%d", &x);
+  scanf("%d", &n);
+  y = pot(x,n);
+  w = potR(x,n);
+  
+  printf("%d %d", y, w);
+    
+  return 0;
+}
