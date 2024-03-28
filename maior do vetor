@@ -1,0 +1,31 @@
+// me retorna o maior número de um vetor de tamanho n e eu preencho esse vetor com os valores
+
+#include <stdio.h>
+#define MAX 15
+
+int maximo(int n, int v[MAX]){
+	int aux;
+
+	if (n == 1)
+		return v[0];
+	else{
+		aux = maximo (n-1, v);
+		if (aux > v[n-1])
+			return aux;
+		else
+			return v[n-1];
+	}
+}
+
+int main(){
+	int n, m;
+	int v[MAX];
+	scanf("%d", &n);
+	for(int i=0; i<n; i++){
+		scanf("%d", &v[i]);
+	}
+	m = maximo(n, v);
+	printf("%d \n", m);
+}
+
+//exemplo de entrada : 3 / 1 3 5  a saída será 5
