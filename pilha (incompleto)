@@ -1,0 +1,59 @@
+#include<stdio.h>
+
+typedef struct cel{
+    char chave;
+    struct cel *prox;
+} celula;
+
+
+
+void empilha_enc_C(char y, celula *t){
+    celula *nova;
+
+    nova = (celula *) malloc (sizeof (celula));
+    nova->chave = y;
+    nova->prox = t->prox;
+    t->prox = nova;
+         
+}
+
+char desempilha_enc_C(celula *t){
+    char x;
+    celula *p;
+
+    if (t->prox != NULL){
+        p = t-> prox;
+        x = p->chave;
+        t->prox = p->prox;
+        free(p);
+        return x;
+    }
+    else{
+        printf("Pilha vazia!\n");
+        return INT_MIN;
+    }
+}
+
+int main(){
+    char y = ' ';
+    char x;
+    celula *t;
+    t = (celula *) malloc(sizeof (celula));
+    t -> prox = NULL;
+
+     scanf("%c", &y);
+
+    while(y != '\n'){
+
+        if(y == '(' || y == '{'){
+            empilha_enc_C(y, t);
+        }
+        if(y == ')' || y == '}'){
+            x = desempilha(t);
+            if(x == '(' && y== ')'){
+                
+            }
+        }
+        scanf("%c", &y);
+    }
+}
