@@ -1,59 +1,46 @@
-#include<stdio.h>
+#include <stdio.h>
 
-typedef struct cel{
-    char chave;
-    struct cel *prox;
+typedef struct cel {
+int chave;
+struct cel *prox;
 } celula;
 
-
-
-void empilha_enc_C(char y, celula *t){
-    celula *nova;
-
-    nova = (celula *) malloc (sizeof (celula));
-    nova->chave = y;
-    nova->prox = t->prox;
-    t->prox = nova;
-         
+void empilha_enc_C(celula y, celula *t)
+{
+celula *nova;
+nova = (celula *) malloc(sizeof (celula));
+nova->chave = y;
+nova->prox = t -> prox;
+t->prox = nova;
 }
 
-char desempilha_enc_C(celula *t){
-    char x;
-    celula *p;
+int desempilhar_enc_C(celula *t)
+{
+int x;
+celula *p;
 
-    if (t->prox != NULL){
-        p = t-> prox;
-        x = p->chave;
-        t->prox = p->prox;
-        free(p);
-        return x;
-    }
-    else{
-        printf("Pilha vazia!\n");
-        return INT_MIN;
-    }
+
+if(t->prox != NULL){
+    p = t->prox;
+    x = p->conteudo;
+    t->prox = p->prox;
+    free(p);
+    return x;
+}
+else{
+    printf ("Pilha vazia!\n");
+    return INT_MIN;
+}
 }
 
 int main(){
-    char y = ' ';
-    char x;
+    int n;
     celula *t;
     t = (celula *) malloc(sizeof (celula));
-    t -> prox = NULL;
+    t->prox = NULL;
 
-     scanf("%c", &y);
+    printf("Me informe o número que será posto na pilha: \n");
+    scanf("%d", &n);
 
-    while(y != '\n'){
-
-        if(y == '(' || y == '{'){
-            empilha_enc_C(y, t);
-        }
-        if(y == ')' || y == '}'){
-            x = desempilha(t);
-            if(x == '(' && y== ')'){
-                
-            }
-        }
-        scanf("%c", &y);
-    }
+    
 }
