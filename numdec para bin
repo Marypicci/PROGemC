@@ -1,0 +1,22 @@
+#include <stdio.h>
+
+int main(void){
+    int pot10, numdec, numbin;
+
+    scanf("%d", &numdec);
+    pot10 = 1;
+    numbin = 0;
+    while (numdec > 0){
+        numbin = numbin + (numdec % 2) * pot10;
+        numdec = numdec / 2;
+        pot10 = pot10 * 10;
+    }
+    printf("%d\n", numbin);
+
+    return 0;
+}
+
+// na hora de compilar no terminar usar: gcc arquivo.cpp
+//escrever ls e decorar o nome que foi gerado
+// escrever: ./"nomeGerado" < "nomeDoArquivoDocComOValorEmDec" -> o scanf usará o valor do arquivo 
+// se escrever: ./"nomeGerado" < "nomeDoArquivoDocComOValorEmDec" > "saida" -> Além de usar a entrada do arquivo dado, irá gerar um arquivo de saida chamado "saida" com o valor do resultado
