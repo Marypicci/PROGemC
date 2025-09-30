@@ -1,0 +1,18 @@
+//Aula de 30/09/2025 Prog Paralela
+//Compila: gcc <nome do arquivo>.c -o <nome do arquivo> -fopenmp
+//executa: ./<nome do arquivo>
+
+#include <stdio.h>
+#include<omp.h>
+
+int main(){
+    int myid, nthreads;
+
+    nthreads= omp_get_num_threads(); //numero total de threads
+    #pragma omp parallel private(myid) shared(nthreads) //divide o trabalho em varios threads
+    {
+        myid = omp_get_thread_num(); //ID de 0 a nthreads-1
+        printf("%d of %d - hello world!\n", myid, nthreads); 
+    }
+    return 0;
+}
