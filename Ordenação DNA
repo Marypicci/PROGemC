@@ -1,0 +1,676 @@
+README
+Ordenação de Grandes Volumes de Dados Genômicos usando MPI
+Como testar os códigos
+1. Primeiro passo é salvar os arquivos: “Gera_DNAs”,
+“Orden_Paralela.c”, “Orden_Sequen.c”, em uma mesma pasta.
+2. Abrir o terminal Ubuntu caso esteja no Windows ou o terminal
+normal no Linux
+2.1. Como baixar o terminal Ubuntu:
+No seu terminal padrão (Prompt de Comando) escreva:
+wsl --install OU wls --intall -d Ubuntu
+Ao baixar ele pedirá um nome de usuário e uma senha (a senha
+não aparecerá na tela por questões de segurança mas será
+computada), escolha de sua preferência.
+Após baixar, abra o terminal Ubuntu através da barra de pesquisa
+da sua área de trabalho escrevendo “Ubuntu”. Em seguida, abrirá
+um terminal onde você deverá atualizar com os seguintes
+comandos:
+sudo apt update
+sudo apt update -y
+sudo apt install mpich build-essential -y (onde vai
+instalar biblioteca MPI e compilador C/C++)
+Para verificar se está instalado escreva:
+mpicc -v
+não é para aparecer nada na tela, se aparecer há algo de errado na
+instalação.
+3. Localize usando “cd” onde está sua pasta com os códigos,
+caso esteja em Windows o comando deve começar com:
+cd /mnt/c/Users/…
+4. Vamos compilar os códigos escrevendo:
+gcc -o gera_dnas Gera_DNAs.c
+gcc -o orden_seq Orden_Sequen.c
+mpicc -o orden_par Orden_Paralela.c
+5. Gerar DNAs escrevendo:
+./gera_dnas 1000 3 10 dna_entrada.txt
+Onde trocamos “1000” pelo número de sequências que deseja, “3”
+pelo tamanho mínimo das sequências e “10” pelo tamanho
+máximo.
+Tamanho mínimo não pode ser maior que o tamanho máximo,
+caso isso ocorra tem uma mensagem de erro.
+6. Vamos ordenar em sequencial:
+./orden_seq dna_entrada.txt dna_saida_seq.txt
+Onde nos mostra os tempos de leitura, ordenação e escrita.
+Caso queira conferir a ordem da saida, basta digitar:
+cat dna_saida_seq.txt
+Caso não queira conferir toda a sequência por ser grande demais,
+pode conferir os 10 primeiros com:
+head dna_saida_seq.txt
+Ou os 10 últimos com:
+tail dna_saida_seq.txt
+7. Vamos executar em paralelo usando:
+mpirun -np 4 ./orden_par dna_entrada.txt dna_saida_par.txt
+Sendo o “4” o número de processadores que desejar.
+8. Para verificar se a ordenação do sequencial teve a mesma
+saída do paralela basta digitar:
+diff dna_saida_seq.txt dna_saida_par.txt
+
+....................................................................................................
+//Programa em Paralelo
+// Mariana Claro Piccini
+
+#include <mpi.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define AMOSTRAS_POR_PROCESSO 20
+#define MAX_LINHA 256
+
+//função que chama strcmp para ordenar vetores
+int compararStrings(const void *a, const void *b){
+    char * const *pa = (char * const *)a;
+    char * const *pb = (char * const *)b;
+    return strcmp(*pa, *pb);
+}
+
+//abre arquivo, le por linha, remove espaços, aloca cópia de cada linha e coloca ponteiros no vetor
+char **lerLinhas(const char *nomeArquivo, long *quantidadeSaida){
+    FILE *arquivo = fopen(nomeArquivo, "r");
+    if(!arquivo){ perror("fopen"); exit(1); }
+    size_t capacidade = 1<<20;
+    char **vetor = malloc(sizeof(char*) * capacidade);
+    long qtd = 0;
+    char buffer[MAX_LINHA];
+    while(fgets(buffer, sizeof(buffer), arquivo)){
+        size_t tamanho = strlen(buffer);
+        if(tamanho>0 && (buffer[tamanho-1]=='\n' || buffer[tamanho-1]=='\r')) { buffer[--tamanho] = '\0'; }
+        if(qtd >= (long)capacidade){
+            capacidade *= 2;
+            vetor = realloc(vetor, sizeof(char*) * capacidade);
+        }
+        vetor[qtd] = malloc(tamanho+1);
+        strcpy(vetor[qtd], buffer);
+        qtd++;
+    }
+    fclose(arquivo);
+    *quantidadeSaida = qtd;
+    return vetor;
+}
+
+//calcula o comprimento de cada string e aloca um buffer com todas strings concatenadas
+void achatar(char **vetor, long qtd, char **bufferSaida, int **comprimentosSaida, long *tamanhoTotal){
+    int *comprimentos = malloc(sizeof(int)*qtd);
+    long total = 0;
+    for(long i=0;i<qtd;i++){
+        comprimentos[i] = strlen(vetor[i]) + 1;
+        total += comprimentos[i];
+    }
+    char *buffer = malloc(total);
+    long pos = 0;
+    for(long i=0;i<qtd;i++){
+        memcpy(buffer+pos, vetor[i], comprimentos[i]);
+        pos += comprimentos[i];
+    }
+    *bufferSaida = buffer;
+    *comprimentosSaida = comprimentos;
+    *tamanhoTotal = total;
+}
+
+//reconstroi o vetor alocando string e copiando os bytes delas
+char **desachatar(char *buffer, int *comprimentos, long qtd){
+    char **vetor = malloc(sizeof(char*) * qtd);
+    long pos = 0;
+    for(long i=0;i<qtd;i++){
+        vetor[i] = malloc(comprimentos[i]);
+        memcpy(vetor[i], buffer+pos, comprimentos[i]);
+        pos += comprimentos[i];
+    }
+    return vetor;
+}
+
+//libera as memorias alocadas para string e vetores
+void liberarVetorStrings(char **vetor, long qtd){
+    for(long i=0;i<qtd;i++) free(vetor[i]);
+    free(vetor);
+}
+
+int main(int argc, char **argv){
+    MPI_Init(&argc, &argv);
+    int processoAtual, totalProcessos; //total de processos
+    MPI_Comm_rank(MPI_COMM_WORLD, &processoAtual);
+    MPI_Comm_size(MPI_COMM_WORLD, &totalProcessos);
+
+    if(argc < 3){ //tem que ter o programa, arquivos de entrada e saida
+        if(processoAtual==0)
+            fprintf(stderr, "Forneça os arquivos de entrada e saida\n");
+        MPI_Finalize(); return 1; //encerra o ambiente MPI
+    }
+    const char *arquivoEntrada = argv[1]; //arquivoEntrada vai ler
+    const char *arquivoSaida = argv[2]; //arquivoSaida vai escrever o resultado
+
+    double tempoInicio = MPI_Wtime(); //medir tempo total em segundos
+
+    char **vetorLocal = NULL; //vetor que vai ter a sequencia dna
+    long qtdLocal = 0; //guarda numero de strings
+
+    long qtdTotal = 0; //armazena total de sequencias lidas
+    int *stringsPorProcesso = NULL; //quantas strings cada processo vai receber
+    int *deslocamentoVetor = NULL; //vetor de deslocamento
+    char *stringsConcatenadas = NULL; //armazena as strings de forma concatenada
+    int *comprimentosStrings = NULL; //armazena comprimento de cada string
+    long tamanhoTotal = 0; //tamanho total
+
+    if(processoAtual == 0){
+        char **todasLinhas = lerLinhas(arquivoEntrada, &qtdTotal); //le todas as linhas
+
+        stringsPorProcesso = malloc(sizeof(int)*totalProcessos);
+        deslocamentoVetor = malloc(sizeof(int)*totalProcessos);
+        long base = qtdTotal / totalProcessos;
+        long resto = qtdTotal % totalProcessos;
+        long indice = 0;
+        for(int i=0;i<totalProcessos;i++){
+            int qtd = base + (i < resto ? 1 : 0);
+            stringsPorProcesso[i] = qtd;
+            deslocamentoVetor[i] = indice;
+            indice += qtd;
+        }
+
+        achatar(todasLinhas, qtdTotal, &stringsConcatenadas, &comprimentosStrings, &tamanhoTotal);
+
+        char **buffersProcesso = malloc(sizeof(char*) * totalProcessos);
+        int *contagemComprimentos = malloc(sizeof(int) * totalProcessos);
+        long *comprimentosBuffer = malloc(sizeof(long) * totalProcessos);
+        for(int i=0;i<totalProcessos;i++){
+            int qtd = stringsPorProcesso[i];
+            contagemComprimentos[i] = qtd;
+            if(qtd==0){ buffersProcesso[i]=NULL; comprimentosBuffer[i]=0; continue; }
+            long bytes = 0;
+            for(int j=0;j<qtd;j++){
+                int idx = deslocamentoVetor[i]+j;
+                bytes += comprimentosStrings[idx];
+            }
+            comprimentosBuffer[i] = bytes;
+            buffersProcesso[i] = malloc(bytes);
+            long pos = 0;
+            for(int j=0;j<qtd;j++){
+                int idx = deslocamentoVetor[i]+j;
+                memcpy(buffersProcesso[i]+pos, todasLinhas[idx], comprimentosStrings[idx]);
+                pos += comprimentosStrings[idx];
+            }
+        }
+
+        for(int i=0;i<totalProcessos;i++){
+            int qtd = stringsPorProcesso[i];
+            if(i==0){
+                if(qtd>0){
+                    qtdLocal = qtd;
+
+                    int *vetorComprimentos = malloc(sizeof(int)*qtd);
+                    long pos = 0;
+                    int k=0;
+                    for(int j=deslocamentoVetor[i]; j<deslocamentoVetor[i]+qtd; j++){
+                        vetorComprimentos[k++] = comprimentosStrings[j];
+                        pos += comprimentosStrings[j];
+                    }
+
+                    char *buffer = malloc(pos);
+                    long ppos = 0; k=0;
+                    for(int j=deslocamentoVetor[i]; j<deslocamentoVetor[i]+qtd; j++){
+                        memcpy(buffer+ppos, todasLinhas[j], comprimentosStrings[j]);
+                        ppos += comprimentosStrings[j];
+                    }
+                    vetorLocal = desachatar(buffer, vetorComprimentos, qtd);
+                    free(buffer); free(vetorComprimentos);
+                } else {
+                    qtdLocal = 0;
+                    vetorLocal = NULL;
+                }
+            } else {
+                MPI_Send(&stringsPorProcesso[i], 1, MPI_INT, i, 0, MPI_COMM_WORLD);
+                if(stringsPorProcesso[i] > 0){
+
+                    int qtd = stringsPorProcesso[i];
+                    int *comprimentos_i = malloc(sizeof(int)*qtd);
+                    for(int j=0;j<qtd;j++){
+                        comprimentos_i[j] = comprimentosStrings[deslocamentoVetor[i] + j];
+                    }
+                    MPI_Send(comprimentos_i, qtd, MPI_INT, i, 1, MPI_COMM_WORLD);
+
+                    long bytes = 0;
+                    for(int j=0;j<qtd;j++) bytes += comprimentos_i[j];
+
+                    char *buffer = malloc(bytes);
+                    long pos = 0;
+                    for(int j=0;j<qtd;j++){
+                        memcpy(buffer+pos, todasLinhas[deslocamentoVetor[i]+j], comprimentos_i[j]);
+                        pos += comprimentos_i[j];
+                    }
+                    MPI_Send(buffer, bytes, MPI_CHAR, i, 2, MPI_COMM_WORLD);
+                    free(comprimentos_i); free(buffer);
+                }
+            }
+        }
+
+        for(long i=0;i<qtdTotal;i++) free(todasLinhas[i]);
+        free(todasLinhas);
+        free(comprimentosStrings); free(stringsConcatenadas);
+
+        free(buffersProcesso); free(contagemComprimentos); free(comprimentosBuffer);
+    } else {
+        MPI_Recv(&qtdLocal, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        if(qtdLocal > 0){
+            int *comprimentos = malloc(sizeof(int)*qtdLocal);
+            MPI_Recv(comprimentos, qtdLocal, MPI_INT, 0, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            long bytes = 0;
+            for(int i=0;i<qtdLocal;i++) bytes += comprimentos[i];
+            char *buffer = malloc(bytes);
+            MPI_Recv(buffer, bytes, MPI_CHAR, 0, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            vetorLocal = desachatar(buffer, comprimentos, qtdLocal);
+            free(buffer); free(comprimentos);
+        } else {
+            vetorLocal = NULL;
+        }
+    }
+
+    double tempoScatter = MPI_Wtime();
+
+    if(qtdLocal > 0) qsort(vetorLocal, qtdLocal, sizeof(char*), compararStrings);
+    double tempoOrdenacaoLocal = MPI_Wtime();
+
+    int s = AMOSTRAS_POR_PROCESSO;
+    int qtdAmostras = (qtdLocal < s) ? (int)qtdLocal : s;
+    char **amostras = NULL;
+    if(qtdAmostras > 0){
+        amostras = malloc(sizeof(char*) * qtdAmostras);
+        for(int i=0;i<qtdAmostras;i++){
+            long idx = (long)( (double)i * qtdLocal / qtdAmostras );
+            if(idx >= qtdLocal) idx = qtdLocal - 1;
+            amostras[i] = vetorLocal[idx];
+        }
+    }
+
+    int *contagemAmostrasRecebidas = NULL;
+    int minhaQtdAmostras = qtdAmostras;
+    if(processoAtual == 0){
+        contagemAmostrasRecebidas = malloc(sizeof(int)*totalProcessos);
+    }
+    MPI_Gather(&minhaQtdAmostras, 1, MPI_INT, contagemAmostrasRecebidas, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+    if(processoAtual == 0){
+        int totalAmostras = 0;
+        for(int i=0;i<totalProcessos;i++) totalAmostras += contagemAmostrasRecebidas[i];
+
+        int *comprimentosAmostras = malloc(sizeof(int) * totalAmostras);
+        char **todasAmostras = malloc(sizeof(char*) * totalAmostras);
+        int posAmostras = 0;
+
+        for(int i=0;i<minhaQtdAmostras;i++){
+            todasAmostras[posAmostras++] = strdup(amostras[i]);
+            comprimentosAmostras[posAmostras-1] = strlen(amostras[i]) + 1;
+        }
+
+        for(int origem=1; origem<totalProcessos; origem++){
+            int qtd = contagemAmostrasRecebidas[origem];
+            for(int k=0;k<qtd;k++){
+                int len;
+                MPI_Recv(&len, 1, MPI_INT, origem, 10, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                char *buffer = malloc(len);
+                MPI_Recv(buffer, len, MPI_CHAR, origem, 11, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                todasAmostras[posAmostras] = buffer;
+                comprimentosAmostras[posAmostras] = len;
+                posAmostras++;
+            }
+        }
+        qsort(todasAmostras, totalAmostras, sizeof(char*), compararStrings);
+
+        char **splitters = NULL;
+        if(totalProcessos > 1){
+            splitters = malloc(sizeof(char*)*(totalProcessos-1));
+            for(int i=1; i<totalProcessos; i++){
+                int idx = i * totalAmostras / totalProcessos;
+                if(idx >= totalAmostras) idx = totalAmostras - 1;
+                splitters[i-1] = strdup(todasAmostras[idx]);
+            }
+        }
+
+        int *comprimentosSplitters = NULL;
+        long bytesSplitters = 0;
+        if(totalProcessos > 1){
+            comprimentosSplitters = malloc(sizeof(int)*(totalProcessos-1));
+            for(int i=0;i<totalProcessos-1;i++){
+                comprimentosSplitters[i] = strlen(splitters[i]) + 1;
+                bytesSplitters += comprimentosSplitters[i];
+            }
+        }
+        int numSplitters = totalProcessos-1;
+        MPI_Bcast(&numSplitters, 1, MPI_INT, 0, MPI_COMM_WORLD);
+        if(totalProcessos>1){
+            MPI_Bcast(comprimentosSplitters, totalProcessos-1, MPI_INT, 0, MPI_COMM_WORLD);
+            char *sbuf = malloc(bytesSplitters);
+            long sp = 0;
+            for(int i=0;i<totalProcessos-1;i++){
+                memcpy(sbuf+sp, splitters[i], comprimentosSplitters[i]);
+                sp += comprimentosSplitters[i];
+            }
+            MPI_Bcast(sbuf, bytesSplitters, MPI_CHAR, 0, MPI_COMM_WORLD);
+            free(sbuf);
+        }
+
+        for(int i=0;i<totalAmostras;i++) free(todasAmostras[i]);
+        free(todasAmostras); free(comprimentosAmostras);
+        if(splitters){
+            for(int i=0;i<totalProcessos-1;i++) free(splitters[i]);
+            free(splitters); free(comprimentosSplitters);
+        }
+        free(contagemAmostrasRecebidas);
+    } else {
+        for(int i=0;i<qtdAmostras;i++){
+            int len = strlen(amostras[i]) + 1;
+            MPI_Send(&len, 1, MPI_INT, 0, 10, MPI_COMM_WORLD);
+            MPI_Send(amostras[i], len, MPI_CHAR, 0, 11, MPI_COMM_WORLD);
+        }
+        int numSplitters;
+        MPI_Bcast(&numSplitters, 1, MPI_INT, 0, MPI_COMM_WORLD);
+        char **splitters = NULL;
+        int *comprimentosSplitters = NULL;
+        if(numSplitters > 0){
+            comprimentosSplitters = malloc(sizeof(int)*numSplitters);
+            MPI_Bcast(comprimentosSplitters, numSplitters, MPI_INT, 0, MPI_COMM_WORLD);
+            long totalSplitBytes = 0;
+            for(int i=0;i<numSplitters;i++) totalSplitBytes += comprimentosSplitters[i];
+            char *sbuf = malloc(totalSplitBytes);
+            MPI_Bcast(sbuf, totalSplitBytes, MPI_CHAR, 0, MPI_COMM_WORLD);
+
+            splitters = malloc(sizeof(char*)*numSplitters);
+            long pos = 0;
+            for(int i=0;i<numSplitters;i++){
+                splitters[i] = malloc(comprimentosSplitters[i]);
+                memcpy(splitters[i], sbuf+pos, comprimentosSplitters[i]);
+                pos += comprimentosSplitters[i];
+            }
+            free(sbuf); free(comprimentosSplitters);
+        }
+    }
+
+    double tempoSplitters = MPI_Wtime();
+
+    int numSplittersGlobal;
+    MPI_Bcast(&numSplittersGlobal, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+    char **splittersLocais = NULL;
+
+    int minhaQtd = (int)qtdLocal;
+    int *todasQtds = NULL;
+    if(processoAtual == 0) todasQtds = malloc(sizeof(int)*totalProcessos);
+    MPI_Gather(&minhaQtd, 1, MPI_INT, todasQtds, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+    double tempoAntesGather = MPI_Wtime();
+
+    int *comprimentosLocais = NULL;
+    char *bufferLocal = NULL;
+    long bytesLocais = 0;
+    if(qtdLocal > 0){
+        comprimentosLocais = malloc(sizeof(int)*qtdLocal);
+        for(long i=0;i<qtdLocal;i++){
+            comprimentosLocais[i] = strlen(vetorLocal[i]) + 1;
+            bytesLocais += comprimentosLocais[i];
+        }
+        bufferLocal = malloc(bytesLocais);
+        long pos = 0;
+        for(long i=0;i<qtdLocal;i++){
+            memcpy(bufferLocal+pos, vetorLocal[i], comprimentosLocais[i]);
+            pos += comprimentosLocais[i];
+        }
+    }
+
+    if(processoAtual == 0){
+        char ***partes = malloc(sizeof(char**) * totalProcessos);
+        int *contagemPartes = malloc(sizeof(int)*totalProcessos);
+        for(int i=0;i<totalProcessos;i++) partes[i] = NULL;
+
+        if(qtdLocal>0){
+            partes[0] = malloc(sizeof(char*) * qtdLocal);
+            contagemPartes[0] = qtdLocal;
+            for(int i=0;i<qtdLocal;i++) partes[0][i] = strdup(vetorLocal[i]);
+        } else {
+            contagemPartes[0] = 0;
+        }
+
+        for(int src=1; src<totalProcessos; src++){
+            int cnt = todasQtds[src];
+            contagemPartes[src] = cnt;
+            if(cnt == 0){ partes[src] = NULL; continue; }
+
+            int *lens = malloc(sizeof(int)*cnt);
+            MPI_Recv(lens, cnt, MPI_INT, src, 20, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            long bytes = 0;
+            for(int i=0;i<cnt;i++) bytes += lens[i];
+            char *buf = malloc(bytes);
+            MPI_Recv(buf, bytes, MPI_CHAR, src, 21, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+            partes[src] = malloc(sizeof(char*)*cnt);
+            long pos = 0;
+            for(int i=0;i<cnt;i++){
+                partes[src][i] = malloc(lens[i]);
+                memcpy(partes[src][i], buf+pos, lens[i]);
+                pos += lens[i];
+            }
+            free(lens); free(buf);
+        }
+
+        typedef struct { char *val; int src; int idx; } HeapNode;
+        int total = 0;
+        for(int i=0;i<totalProcessos;i++) total += contagemPartes[i];
+
+        HeapNode *heap = malloc(sizeof(HeapNode) * totalProcessos);
+        int heap_size = 0;
+        for(int i=0;i<totalProcessos;i++){
+            if(contagemPartes[i] > 0){
+                heap[heap_size].val = partes[i][0];
+                heap[heap_size].src = i;
+                heap[heap_size].idx = 0;
+                heap_size++;
+            }
+        }
+
+        // funções de heap (sift up/down) usando ponteiros e strcmp
+        void heap_swap(HeapNode *h, int i, int j){
+            HeapNode tmp = h[i]; h[i] = h[j]; h[j] = tmp;
+        }
+        void heap_sift_down(HeapNode *h, int *hsize, int i){
+            int smallest = i;
+            int l = 2*i + 1, r = 2*i + 2;
+            if(l < *hsize && strcmp(h[l].val, h[smallest].val) < 0) smallest = l;
+            if(r < *hsize && strcmp(h[r].val, h[smallest].val) < 0) smallest = r;
+            if(smallest != i){ heap_swap(h, i, smallest); heap_sift_down(h, hsize, smallest); }
+        }
+        void heap_sift_up(HeapNode *h, int i){
+            if(i==0) return;
+            int parent = (i-1)/2;
+            if(strcmp(h[i].val, h[parent].val) < 0){
+                heap_swap(h, i, parent); heap_sift_up(h, parent);
+            }
+        }
+        for(int i=(heap_size/2)-1; i>=0; i--) heap_sift_down(heap, &heap_size, i);
+
+        FILE *fo = fopen(arquivoSaida, "w");
+        if(!fo){ perror("fopen out"); exit(1); }
+
+        while(heap_size > 0){
+            fprintf(fo, "%s\n", heap[0].val);
+            int src = heap[0].src;
+            int idx = heap[0].idx + 1;
+            if(idx < contagemPartes[src]){
+                heap[0].val = partes[src][idx];
+                heap[0].src = src;
+                heap[0].idx = idx;
+            } else {
+                heap[0] = heap[heap_size-1];
+                heap_size--;
+            }
+            if(heap_size > 0) heap_sift_down(heap, &heap_size, 0);
+        }
+        fclose(fo);
+
+        free(heap);
+        for(int i=0;i<totalProcessos;i++){
+            if(contagemPartes[i] > 0){
+                for(int j=0;j<contagemPartes[i];j++) free(partes[i][j]);
+                free(partes[i]);
+            }
+        }
+        free(partes); free(contagemPartes); free(todasQtds);
+    } else {
+        if(qtdLocal > 0){
+            MPI_Send(comprimentosLocais, qtdLocal, MPI_INT, 0, 20, MPI_COMM_WORLD);
+            MPI_Send(bufferLocal, bytesLocais, MPI_CHAR, 0, 21, MPI_COMM_WORLD);
+        } 
+    }
+
+    double tempoFim = MPI_Wtime();
+
+    if(bufferLocal) free(bufferLocal);
+    if(comprimentosLocais) free(comprimentosLocais);
+    if(vetorLocal) liberarVetorStrings(vetorLocal, qtdLocal);
+
+    if(processoAtual == 0){
+        printf("Tempo total: %f s\n", tempoFim - tempoInicio);
+        printf("Tempo distribuir + ler: %f s\n", tempoScatter - tempoInicio);
+        printf("Tempo cada processo: %f s\n", tempoOrdenacaoLocal - tempoScatter);
+        printf("Tempo ordenar + merge + escrever: %f\n", tempoFim - tempoAntesGather);
+    }
+
+    MPI_Finalize();
+    return 0;
+}
+
+
+...................................................................................................
+
+//Progama Sequencial
+//Mariana Claro Piccini
+
+#include <stdio.h>
+#include <stdlib.h> //aloca memoria
+#include <string.h> //strcmp, strcpy,strln -> strings
+#include <time.h> //clock
+#define MAX_LINE 256 //potencia de 2, poderia ser 128, 512...
+
+//ordena strings
+int cmp(const void *a, const void *b){
+    char * const *pa = (char * const *)a;
+    char * const *pb = (char * const *)b;
+    return strcmp(*pa, *pb);
+}
+
+//cria o vetor
+char **ler_linhas(const char *arquivo, long *n){
+    FILE *f = fopen(arquivo,"r"); if(!f){ perror("fopen"); exit(1); }
+    size_t cap = 1<<20; //aproximadamente 1 milhao 
+    char **vetor = malloc(sizeof(char*) * cap);
+    long cnt = 0;
+    char buf[MAX_LINE];
+    //le linha do arquivo removendo os espaços em branco
+    while(fgets(buf, sizeof(buf), f)){
+        size_t L = strlen(buf);
+        if(L > 0 && (buf[L - 1]=='\n' || buf[L - 1]=='\r')) buf[--L] = '\0';
+        if(cnt >= (long)cap){
+            cap *= 2; vetor = realloc(vetor, sizeof(char*) * cap); //aumenta dinamicamente o vetor
+        }
+        vetor[cnt] = malloc(L + 1); //aloca memoria 
+        strcpy(vetor[cnt], buf);
+        cnt++;
+    }
+    fclose(f);
+    *n = cnt; return vetor;
+}
+
+int main(int argc, char **argv){
+    //verifica se forneceu arquivo de entrada e saida
+    if(argc<3){ //argv[0] nome do programa, argv[1] arquivo de entrada, argv[2] arquivo de saida
+        fprintf(stderr,"Passe o arquivo de entrada e de saída\n"); 
+        return 1;
+    }
+
+    double tempoAntesLeitura = (double)clock() / CLOCKS_PER_SEC; //clock() mede ciclos da CPU
+    long n;
+    char **vetor = ler_linhas(argv[1], &n);
+    double tempoPosLeitura = (double)clock() / CLOCKS_PER_SEC;
+
+    qsort(vetor, n, sizeof(char*), cmp); //ordena vetor n usando cmp
+    double tempoPosOrdenar = (double)clock() / CLOCKS_PER_SEC;
+
+    //abre o arquivo e escreve em ordem, depois fecha
+    FILE *fo = fopen(argv[2],"w");
+    for(long i = 0; i < n; i++) fprintf(fo,"%s\n", vetor[i]);
+    fclose(fo);
+    double tempoPosEscrever = (double)clock() / CLOCKS_PER_SEC;
+
+    float t_leitura = tempoPosLeitura - tempoAntesLeitura;
+    float t_orde = tempoPosOrdenar - tempoPosLeitura;
+    float t_escreve = tempoPosEscrever - tempoPosOrdenar;
+    float t_total = t_leitura + t_escreve + t_orde;
+
+    printf("Tempo de leitura: %f s\n", t_leitura);
+    printf("Tempo para ordenar: %f s\n", t_orde);
+    printf("Tempo de escrever: %f s\n", t_escreve);
+    printf("Tempo Total: %f s\n", t_total);
+
+    //liberando memoria
+    for(long i=0;i<n;i++) free(vetor[i]);
+    free(vetor);
+    return 0;
+}
+
+...............................................................................................................................................................
+//Programa que gera um arquivo de sequencias aleatorias
+//Mariana Claro Piccini
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+//A = Adenina C = Citosina G = Guanina T = Timina
+const char *CHARS = "ACGT";
+
+int main(int argc, char **argv){
+    if(argc < 5){ //programa precisa de 4 argumentos
+        fprintf(stderr,"Precisa informar: Numero de sequencias, tamanho minimo, tamanho maximo, arquivo de saida\n"); 
+        return 1;
+    }
+
+    //atol converte string pra long
+    //atoi converte para int
+    long N = atol(argv[1]); //quantos sequencias pediu no terminal
+    int Lmin = atoi(argv[2]); //comprimento minimo dito no terminal
+    int Lmax = atoi(argv[3]); //coprimento maximo dito no terminal
+    const char *arqSaida = argv[4]; //nome do arquivo de saida
+
+    if(Lmin > Lmax){
+        fprintf(stderr,"Tamanho minimo nao pode ser maior que tamanho maximo\n");
+        return 1;
+    }
+
+    srand(time(NULL)); // gera sequencias diferentes em cada execução
+
+    //abre arquivo para escrever
+    FILE *f = fopen(arqSaida, "w");
+    if(!f){ 
+        perror("fopen"); 
+        return 1; 
+    }
+
+
+    for(long i=0;i<N;i++){
+        int L = Lmin + rand() % (Lmax - Lmin + 1); //escolhe aleatoriamente o tamanho da sequencia entre Lmin e Lmax
+        for(int j = 0; j < L; j++){
+            putc(CHARS[rand()%4], f); 
+        }
+        putc('\n', f); //quebra linha
+        
+    }
+    fclose(f); //fecha o arquivo
+    return 0;
+}
+
+......................................................................................................
