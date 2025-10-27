@@ -1,0 +1,223 @@
+//Aluna: Mariana Claro Piccini
+/*Um programa paralelo usando OpenMP para resolver a multiplicação 
+de duas matrizes quadradas de ordem n da forma C=AxB usando 
+o particionamento 2D
+Compara com sequencial (com e sem cache) e com paralelo (com e sem cache)
+*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <omp.h>
+
+#define bloco 64 //16, 32, 64, 128
+                  //64 linhas e 64 colunas por bloco
+void fill_n(int *m, int n , int val){
+
+  for(int i=0; i<n; i++)
+    m[i]=val;
+}
+
+void Parfill_n(int *m, int n , int val){
+  #pragma omp for nowait
+  for(int i=0; i<n; i++)
+    m[i]=val;
+}
+  
+int pos(int *m, int i, int j, int cols){
+  // Row major
+  return m[i*cols + j];
+}
+
+ int areMatricesEqual(int *a, int *b, int n, int m){
+  
+  for (int i = 0; i < n; i++)  {
+    for (int j = 0; j < m; j++){
+      if (pos(a, i, j, m) != pos(b, i, j, m))
+            return 0;
+    }          
+  }
+  return 1;
+}
+  
+int *allocate(int rows, int cols){
+  
+  return (int *) malloc(rows*cols*sizeof(int));
+}
+
+// naive implementation C = A*B
+void MatMul(int* c, int* a, int* b, int n, int m, int p) {
+
+  fill_n(c, n * p, 0);
+
+  for (int i = 0; i < n; i++){
+    
+    for (int j = 0; j < p; j++){
+      
+      for (int k = 0; k < m; k++){
+	c[i*p + j] += pos(a, i, k, m) * pos(b, k, j, p);
+      }
+    }
+  }
+}
+
+// OpenMP naive implementation C = A*B
+void MatMulOpenMP(int *c, int * a, int * b, int n, int m, int p ){
+  #pragma omp parallel
+  {
+  Parfill_n(c, n * p, 0);
+
+  #pragma omp  for collapse(2)
+  for (int i = 0; i < n; i++)  {
+    for (int j = 0; j < p ; j++){
+      int result = 0;
+      
+      #pragma omp simd reduction(+:result)
+      for (int  k = 0; k < m ; k++) {
+	result += pos(a, i, k, m) * pos(b, k, j, p);
+      }       
+      c[i*p + j] = result;
+    }
+  }
+  }
+}
+
+// Cached implementation C = A*B
+void MatMulCache(int* c, int* a, int* b, int n, int m, int p) {
+
+  fill_n(c, n  * p, 0);
+
+  for (int i = 0; i < n; i++){
+    
+    for (int k = 0; k <  m; k++){
+      
+      for (int j = 0; j < p; j++){
+	c[i*p + j] += pos(a, i, k, m) * pos(b, k, j, p);
+      }
+    }
+  }
+}
+
+//Cached OpenMp implementation C = A*B
+void MatMulCacheOpenMP(int* c, int* a, int* b, int n, int m, int p) {
+
+  #pragma omp parallel
+  {
+  Parfill_n(c, n * p, 0);
+  
+  #pragma omp  for
+  for (int i = 0; i < n; i++){  
+    for (int k = 0; k <  m; k++){
+      for (int j = 0; j < p; j++){
+	c[i*p + j] += pos(a, i, k, m) * pos(b, k, j, p);
+      }
+    }
+  }
+  }
+}
+
+// função do 2D
+void Matriz2d(int* c, int* a, int* b, int n, int m, int p) {
+    #pragma omp parallel
+    {
+        #pragma omp for
+        for (int i = 0; i < n * p; i++) {
+            c[i] = 0;
+        }
+
+        #pragma omp for collapse(2) schedule(dynamic)
+        for (int ii = 0; ii < n; ii += bloco) {
+            for (int jj = 0; jj < p; jj += bloco) {
+                for (int kk = 0; kk < m; kk += bloco) {
+
+                    int i_max = (ii + bloco > n) ? n : ii + bloco;
+                    int j_max = (jj + bloco > p) ? p : jj + bloco;
+                    int k_max = (kk + bloco > m) ? m : kk + bloco;
+
+                    for (int i = ii; i < i_max; i++) {
+                        for (int k = kk; k < k_max; k++) {
+                            int a_val = a[i * m + k];
+                            for (int j = jj; j < j_max; j++) {
+                                c[i * p + j] += a_val * b[k * p + j];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+int main(void) {
+  int N;
+  int numThreads;
+  int *a, *b, *c, *r;
+  double ts;
+
+  omp_set_nested(1);
+
+  printf("Quantos threads deseja usar? ");
+  if (scanf("%d", &numThreads) != 1 || numThreads <= 0) {
+      fprintf(stderr, "Erro: número de threads inválido.\n");
+      return 1;
+  }
+  omp_set_num_threads(numThreads);
+
+  printf("Qual o tamanho N da matriz NxN? ");
+  if (scanf("%d", &N) != 1 || N <= 0) {
+      fprintf(stderr, "Erro: tamanho N inválido.\n");
+      return 1;
+  }
+
+  printf("\nCalculando... \n");
+  
+  a = allocate(N, N);
+  b = allocate(N, N);
+  c = allocate(N, N);
+  r = allocate(N, N);
+
+  //faz as matrizes com valores aleatórios
+  srand(time(NULL));
+  for (int i = 0; i < N*N; i++) {
+    a[i] = rand() % 100;
+    b[i] = rand() % 100;
+  }
+
+  ts = omp_get_wtime();
+  MatMul(r, a, b, N, N, N );
+  printf("\nSequencial: %f s\n",  omp_get_wtime() - ts );
+
+  ts = omp_get_wtime();
+  MatMulOpenMP(c, a, b, N, N, N);
+  if (areMatricesEqual(c, r, N, N))
+    printf("Paralela simples: %f s\n", omp_get_wtime() - ts );
+  
+
+  ts=omp_get_wtime();
+  MatMulCache(c, a, b, N, N, N);
+  if (areMatricesEqual(c, r, N, N)){
+   printf("Sequencial com cache: %f s\n",  omp_get_wtime() - ts );
+  }
+
+  ts=omp_get_wtime();
+  MatMulCacheOpenMP(c, a, b, N, N, N);
+  if (areMatricesEqual(c, r, N, N)){
+    printf("Paralela com cache: %f s\n", omp_get_wtime() - ts );
+  }
+
+  ts=omp_get_wtime();
+  Matriz2d(c, a, b, N, N, N);
+  if (areMatricesEqual(c, r, N, N)){
+    printf("Paralela 2D: %f s\n", omp_get_wtime() - ts );
+  }
+    
+  free(a);
+  free(b);
+  free(c);
+  free(r);
+
+  return 0;
+}
+
+#pragma
